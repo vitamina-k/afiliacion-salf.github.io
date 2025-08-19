@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MAESTRO España · Afiliados (Mapa + Ingestión CSV)</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="anonymous" />
+  <style>
+    :root{
+      --bg:#0b1020; --panel:#0f1730; --muted:#9fb0d0; --text:#e7eeff; --border:rgba(255,255,255,.12);
+      --chip:#162457; --accent:#7aa2ff; --ok:#2ecc71; --danger:#ff6b6b;
+    }
+    html,body{height:100%;margin:0;background:var(--bg);color:var(--text);font-family:ui-sans-serif,system-ui,Segoe UI,Roboto,Arial}
+    .app{display:grid;grid-template-columns:380px 1fr;height:100%}
+    #panel{background:linear-gradient(180deg,var(--panel),#0b1430 80%);border-right:1px solid var(--border);padding:14px;overflow:auto}
+    h1{font-size:18px;margin:0 0 6px;font-weight:800}
+    .sub{color:var(--muted);font-size:12px;margin-bottom:10px}
+    .card{background:#131b3b;border:1px solid var(--border);border-radius:14px;padding:12px;margin:10px 0;box-shadow:0 10px 22px rgba(0,0,0,.18) inset}
+    label{font-size:12px;color:var(--muted);display:block;margin:6px 0}
+    input,select{width:100%;padding:10px 12px;border-radius:10px;border:1px solid var(--border);background:#0d1a3a;color:var(--text);outline:none}
+    .row{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+    .btn{display:inline-flex;align-items:center;gap:8px;padding:10px 12px;border:1px solid var(--border);background:#142459;color:var(--text);border-radius:10px;cursor:pointer;font-weight:700}
+    .btn.primary{background:linear-gradient(180deg,#203aa0,#1b2c7a)}
+    .btn.ok{background:linear-gradient(180deg,#1d7a4e,#165e3c)}
+    .btn.danger{background:linear-gradient(180deg,#a02020,#7a1b1b)}
+    .btn.small{padding:6px 9px;font-size:12px}
+    #map{height:100%;width:100%}
+    .topbar{position:absolute;top:12px;left:12px;z-index:10;display:flex;gap:8px;flex-wrap:wrap}
+    .bottom-right{position:absolute;right:12px;bottom:12px;z-index:10;display:flex;gap:8px;flex-wrap:wrap}
+    table{width:100%;border-collapse:collapse;font-size:13px}
+    th,td{border-bottom:1px solid var(--border);padding:8px 6px;text-align:left}
+    th{color:var(--muted);position:sticky;top:0;background:#111b3a}
+    .chip{display:inline-block;padding:.25rem .5rem;border-radius:999px;background:var(--chip);border:1px solid var(--border);font-size:12px;color:var(--muted)}
+    .note{font-size:12px;color:var(--muted)}
+  </style>
+</head>
+<body>
+<div class="app">
+  <aside id="panel">
+    <h1>MAESTRO España · Afiliados</h1>
+    <div class="sub">Sube CSVs por delegación y verás el agregado nacional en el mapa. Requiere Firebase (Firestore + Auth anónimo).</div>
+
+    <div class="card">
+      <div style="font-weight:800;margin-bottom:6px">1) Conexión</div>
+      <label>Config Firebase (pega tu <b>firebaseConfig</b>)</label>
+      <textarea id="fbCfg" rows="6" style="width:100%;padding:10px 12px;border-radius:10px;border:1px solid var(--border);background:#0d1a3a;color:var(--text)" placeholder='{
+  "apiKey": "...",
+  "authDomain": "...",
+  "projectId": "...",
+  "storageBucket": "...",
+  "messagingSenderId": "...",
+  "appId": "..."
+}'></textarea>
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <button class="btn primary" id="btnInit">⚡ Iniciar</button>
+        <button class="btn" id="btnAnon">👤 Login anónimo</button>
+        <span id="authState" class="chip">Desconectado</span>
+      </div>
+      <div class="note" style="margin-top:6px">Consejo: crea un proyecto en Firebase · Habilita <b>Auth anónimo</b> y <b>Firestore</b>. Las claves de config NO son secretas.</div>
+    </div>
+
+    <div class="card" id="ingestion" style="display:none">
+      <div style="font-weight:800;margin-bottom:6px">2) Ingesta CSV</div>
+      <div class="row">
+        <div>
+          <label>Provincia</label>
+          <select id="provinciaSel">
+            <option value="A Coruña">A Coruña</option>
+            <option value="Álava">Álava</option>
+            <option value="Albacete">Albacete</option>
+            <option value="Alicante">Alicante</option>
+            <option value="Almería">Almería</option>
+            <option value="Asturias">Asturias</option>
+            <option value="Ávila">Ávila</option>
+            <option value="Badajoz">Badajoz</option>
+            <option value="Barcelona">Barcelona</option>
+            <option value="Burgos">Burgos</option>
+            <option value="Cáceres">Cáceres</option>
+            <option value="Cádiz">Cádiz</option>
+            <option value="Cantabria">Cantabria</option>
+            <option value="Castellón">Castellón</option>
+            <option value="Ciudad Real">Ciudad Real</option>
+            <option value="Córdoba">Córdoba</option>
+            <option value="Cuenca">Cuenca</option>
+            <option value="Girona">Girona</option>
+            <option value="Granada">Granada</option>
+            <option value="Guadalajara">Guadalajara</option>
+            <option value="Gipuzkoa">Gipuzkoa</option>
+            <option value="Huelva">Huelva</option>
+            <option value="Huesca">Huesca</option>
+            <option value="Illes Balears">Illes Balears</option>
+            <option value="Jaén">Jaén</option>
+            <option value="La Rioja">La Rioja</option>
+            <option value="Las Palmas">Las Palmas</option>
+            <option value="León">León</option>
+            <option value="Lleida">Lleida</option>
+            <option value="Lugo">Lugo</option>
+            <option value="Madrid">Madrid</option>
+            <option value="Málaga">Málaga</option>
+            <option value="Murcia">Murcia</option>
+            <option value="Navarra">Navarra</option>
+            <option value="Ourense">Ourense</option>
+            <option value="Palencia">Palencia</option>
+            <option value="Pontevedra">Pontevedra</option>
+            <option value="Salamanca">Salamanca</option>
+            <option value="Santa Cruz de Tenerife">Santa Cruz de Tenerife</option>
+            <option value="Segovia">Segovia</option>
+            <option value="Sevilla">Sevilla</option>
+            <option value="Soria">Soria</option>
+            <option value="Tarragona">Tarragona</option>
+            <option value="Teruel">Teruel</option>
+            <option value="Toledo">Toledo</option>
+            <option value="Valencia" selected>Valencia</option>
+            <option value="Valladolid">Valladolid</option>
+            <option value="Bizkaia">Bizkaia</option>
+            <option value="Zamora">Zamora</option>
+            <option value="Zaragoza">Zaragoza</option>
+          </select>
+        </div>
+        <div>
+          <label>Etiqueta (delegación / responsable)</label>
+          <input id="tag" placeholder="p. ej. Delegación Valencia" />
+        </div>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <div>
+          <label>Archivo CSV</label>
+          <input id="csvFile" type="file" accept=".csv" />
+        </div>
+        <div>
+          <label>&nbsp;</label>
+          <button class="btn ok" id="btnUpload">⬆️ Subir & agregar</button>
+        </div>
+      </div>
+      <div class="note" style="margin-top:8px">Formato esperado: <i>nombre, apellidos, fecha de nacimiento, telefono, email, numero de afiliado, ciudad, provincia</i>. El parser corrige desajustes comunes (comillas, comas perdidas) y <b>solo guarda agregados ciudad/provincia</b>.</div>
+      <div style="display:flex;gap:8px;margin-top:10px">
+        <button class="btn" id="btnExportAgg">⬇️ Exportar agregado (CSV)</button>
+        <button class="btn danger" id="btnWipe" title="Requiere regla admin">🗑️ Vaciar agregado</button>
+      </div>
+    </div>
+
+    <div class="card" id="tablaAgg" style="display:none">
+      <div style="font-weight:800;margin-bottom:6px">Agregado nacional (por ciudad)</div>
+      <input id="buscar" placeholder="Buscar ciudad…" />
+      <table id="tbl"><thead><tr><th>Ciudad</th><th>Provincia</th><th style="text-align:right">Personas</th><th>Etiqueta</th></tr></thead><tbody></tbody></table>
+      <div class="note">Doble clic para enfocar en el mapa. Se actualiza en tiempo real.</div>
+    </div>
+  </aside>
+
+  <main style="position:relative">
+    <div class="topbar">
+      <button class="btn" id="fitEsp">🇪🇸 Ver España</button>
+      <select id="filtroProv" class="btn">
+        <option value="Todas">Todas las provincias</option>
+      </select>
+      <span id="sumSpan" class="chip">Total: 0</span>
+    </div>
+    <div id="map"></div>
+    <div class="bottom-right">
+      <button class="btn" id="exportPng">🖼️ Descargar PNG</button>
+    </div>
+  </main>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js" crossorigin="anonymous"></script>
+<!-- Firebase (modular) -->
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-app.js";
+  import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-auth.js";
+  import { getFirestore, doc, setDoc, getDoc, getDocs, collection, query, where, onSnapshot, writeBatch, deleteDoc } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-firestore.js";
+
+  // ====== Estado global ======
+  let app, auth, db, user=null;
+  let markersByKey = new Map();
+  const AGG_COL = 'afiliados_agregado'; // docId = `${provincia}__${ciudad}`
+
+  // ====== UI helpers ======
+  const $ = (sel)=> document.querySelector(sel);
+  const $$ = (sel)=> document.querySelectorAll(sel);
+  const sleep = (ms)=> new Promise(r=>setTimeout(r,ms));
+
+  // ====== Mapa ======
+  const map = L.map('map');
+  map.setView([40.25,-3.7], 5.5);
+  const base = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {maxZoom:18, attribution:'© OpenStreetMap & CARTO', crossOrigin:true}).addTo(map);
+
+  function markerSize(n){ return Math.min(80, Math.max(18, 16 + Math.sqrt(n)*6)); }
+  function makeIcon(n){ const s=markerSize(n); return L.divIcon({ className:'', html:`<div style="background:#2957ff;color:#fff;border-radius:999px;border:2px solid rgba(255,255,255,.85);width:${s}px;height:${s}px;display:flex;align-items:center;justify-content:center;font-weight:800;box-shadow:0 10px 20px rgba(0,0,0,.35),0 0 0 3px rgba(255,255,255,.2) inset">${n}</div>`, iconSize:[s,s], iconAnchor:[s/2,s/2] }); }
+
+  function upsertMarker(key, lat, lon, n, payload){
+    let m = markersByKey.get(key);
+    if(!m){ m = L.marker([lat,lon], { icon: makeIcon(n) }).addTo(map); markersByKey.set(key,m); }
+    else { m.setLatLng([lat,lon]); m.setIcon(makeIcon(n)); }
+    const html = `<div style="min-width:220px">
+      <div style="font-weight:800">${payload.ciudad}</div>
+      <div class="sub">${payload.provincia}</div>
+      <div class="chip">Personas: <b>${n}</b></div>
+      <div class="note" style="margin-top:6px">Última etiqueta: ${payload.tag||'-'}</div>
+    </div>`;
+    m.bindPopup(html);
+  }
+
+  // ====== Geocodificación con caché (Nominatim) ======
+  async function geocodeCity(ciudad, provincia){
+    const cacheId = `geocache__${provincia}__${ciudad}`;
+    const ref = doc(db, 'geocache', cacheId);
+    const snap = await getDoc(ref);
+    if(snap.exists()) return snap.data();
+    const url = new URL('https://nominatim.openstreetmap.org/search');
+    url.searchParams.set('format','jsonv2');
+    url.searchParams.set('q', `${ciudad}, ${provincia}, España`);
+    url.searchParams.set('addressdetails','1');
+    url.searchParams.set('limit','1');
+    const res = await fetch(url, { headers:{'Accept':'application/json'}});
+    if(!res.ok) throw new Error('geocode failed');
+    const data = await res.json();
+    if(!data?.length) throw new Error('no results');
+    const out = { lat: parseFloat(data[0].lat), lon: parseFloat(data[0].lon), ciudad, provincia };
+    await setDoc(ref, out, { merge:true });
+    await sleep(500); // civility with Nominatim
+    return out;
+  }
+
+  // ====== Normalización de nombres de ciudad (ejemplos CV) ======
+  function normalizeCity(c){
+    if(!c) return c; c = c.trim();
+    const t = c.normalize('NFKC')
+      .replaceAll('´', "'")
+      .replace(/\s+/g,' ')
+      .replace(/^valència$/i, 'Valencia')
+      .replace(/^torrente$/i, 'Torrent')
+      .replace(/^vila-?real$/i, 'Villarreal')
+      .replace(/^vinaro[s|̀|́]?$/i, 'Vinaròs')
+      .replace(/^almazora$/i, 'Almassora')
+      .replace(/^la vall d[’'´`]?uixó$/i, "La Vall D'uixó");
+    // Title Case básico
+    return t.split(' ').map(w=> w.length>2 ? (w[0].toUpperCase()+w.slice(1).toLowerCase()) : w.toLowerCase()).join(' ').replace("D'uixó","D'uixó");
+  }
+
+  // ====== Auth / Init ======
+  $('#btnInit').onclick = async()=>{
+    try{
+      const cfg = JSON.parse($('#fbCfg').value || '{}');
+      app = initializeApp(cfg);
+      auth = getAuth(app);
+      db = getFirestore(app);
+      $('#ingestion').style.display='block';
+      $('#tablaAgg').style.display='block';
+      $('#authState').textContent = 'App cargada';
+      attachRealtime();
+      await loadAggTable();
+      buildProvFilter();
+    }catch(e){ alert('Config Firebase inválida'); console.error(e); }
+  };
+  $('#btnAnon').onclick = async()=>{
+    if(!auth){ alert('Inicia primero la app'); return; }
+    try{ await signInAnonymously(auth); }catch(e){ alert('Error login anónimo'); console.error(e);}  };
+  onAuthStateChanged(getAuth(), (u)=>{ user=u; $('#authState').textContent = u? ('Anon UID '+u.uid.slice(0,6)+'…') : 'Desconectado'; });
+
+  // ====== Ingesta CSV ======
+  function parseCSVLine(line){
+    const out=[]; let cur=''; let q=false; for(let i=0;i<line.length;i++){
+      const ch=line[i];
+      if(ch==='"'){
+        if(q && line[i+1]==='"'){ cur+='"'; i++; }
+        else q=!q;
+      } else if(ch===',' && !q){ out.push(cur); cur=''; }
+      else { cur+=ch; }
+    } out.push(cur); return out.map(s=> s.trim());
+  }
+
+  async function handleUpload(){
+    const file = $('#csvFile').files?.[0]; if(!file){ alert('Selecciona un CSV'); return; }
+    const provincia = $('#provinciaSel').value; const tag = $('#tag').value.trim();
+    const text = await file.text(); const lines = text.split(/\r?\n/).filter(Boolean);
+
+    // header detection (permitimos con/sin cabecera)
+    let start=0; const header = parseCSVLine(lines[0]).map(s=>s.toLowerCase());
+    const looksHeader = header.includes('nombre') && header.includes('apellidos');
+    if(looksHeader) start=1;
+
+    const batch = writeBatch(db);
+    const agg = new Map(); // key => count
+
+    for(let i=start;i<lines.length;i++){
+      const cols = parseCSVLine(lines[i]);
+      // Intentamos mapear columnas flexibles
+      let nombre, apellidos, fecha, tel, email, num, ciudad, prov;
+      if(cols.length===8){ [nombre, apellidos, fecha, tel, email, num, ciudad, prov] = cols; }
+      else if(cols.length>=9){ nombre=cols[0]; apellidos=cols[1]; fecha=cols[2]; tel=cols[3]; email=cols[4]; num=cols[5]; ciudad=cols[6]; prov=cols[7]; }
+      else { continue; }
+      ciudad = normalizeCity(ciudad || '');
+      const p = (provincia || prov || '').trim() || provincia;
+      if(!ciudad || !p) continue;
+      const key = `${p}__${ciudad}`;
+      agg.set(key, (agg.get(key)||0)+1);
+    }
+
+    // Persistir agregado en Firestore (suma incremental)
+    for(const [key, n] of agg){
+      const [prov, ciudad] = key.split('__');
+      const ref = doc(db, AGG_COL, key);
+      const snap = await getDoc(ref);
+      const prev = snap.exists()? (snap.data().personas||0) : 0;
+      batch.set(ref, { provincia:prov, ciudad, personas: prev + n, tag, updatedAt: Date.now() }, { merge:true });
+      // Geocache en segundo plano
+      try{ const g = await geocodeCity(ciudad, prov); const gref = doc(db,'geocache',`geocache__${prov}__${ciudad}`); batch.set(gref,g,{merge:true}); }catch(e){}
+      await sleep(250);
+    }
+
+    await batch.commit();
+    alert('Agregado actualizado');
+  }
+  $('#btnUpload').onclick = handleUpload;
+
+  // ====== Tabla agregado ======
+  async function loadAggTable(){
+    const qSnap = await getDocs(collection(db, AGG_COL));
+    renderTable(qSnap.docs.map(d=> d.data()));
+  }
+  function renderTable(rows){
+    const q = ($('#buscar').value||'').toLowerCase();
+    const tbody = $('#tbl tbody'); tbody.innerHTML='';
+    let total=0; const items = rows.filter(r=> !q || (r.ciudad+" "+r.provincia).toLowerCase().includes(q))
+      .sort((a,b)=> (b.personas-a.personas) || a.provincia.localeCompare(b.provincia) || a.ciudad.localeCompare(b.ciudad));
+    for(const r of items){
+      total += Number(r.personas)||0;
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td>${r.ciudad}</td><td>${r.provincia}</td><td style="text-align:right">${r.personas}</td><td>${r.tag||''}</td>`;
+      tr.ondblclick = ()=> focusCity(r);
+      tbody.appendChild(tr);
+    }
+    $('#sumSpan').textContent = `Total: ${total}`;
+  }
+  $('#buscar').oninput = ()=> attachRealtime.lastRows && renderTable(attachRealtime.lastRows);
+
+  // ====== Tiempo real ======
+  function attachRealtime(){
+    const qcol = collection(db, AGG_COL);
+    onSnapshot(qcol, (snap)=>{
+      const rows = snap.docs.map(d=> d.data());
+      attachRealtime.lastRows = rows;
+      renderTable(rows);
+      renderMarkers(rows);
+      buildProvFilter(rows);
+    });
+  }
+
+  async function renderMarkers(rows){
+    // limpiar markers que ya no estén
+    const active = new Set();
+    const selectedProv = $('#filtroProv').value || 'Todas';
+    for(const r of (rows||[])){
+      if(selectedProv!=='Todas' && r.provincia!==selectedProv) continue;
+      const key = `${r.provincia}__${r.ciudad}`; active.add(key);
+      try{
+        let g = null;
+        try{ const snap = await getDoc(doc(db,'geocache',`geocache__${r.provincia}__${r.ciudad}`)); if(snap.exists()) g = snap.data(); }
+        catch(e){}
+        if(!g){ g = await geocodeCity(r.ciudad, r.provincia); }
+        upsertMarker(key, g.lat, g.lon, r.personas, r);
+      }catch(e){ console.warn('Geocode fallo', r.ciudad, r.provincia); }
+      await sleep(150);
+    }
+    // remove markers no-activos
+    for(const [key,m] of markersByKey){ if(!active.has(key)){ m.remove(); markersByKey.delete(key); } }
+  }
+
+  function buildProvFilter(rows){
+    const sel = $('#filtroProv');
+    if(sel.dataset.filled==='1' && !rows) return;
+    const set = new Set((rows||attachRealtime.lastRows||[]).map(r=> r.provincia));
+    const cur = sel.value;
+    sel.innerHTML = `<option value="Todas">Todas las provincias</option>` +
+      Array.from(set).sort().map(p=> `<option value="${p}">${p}</option>`).join('');
+    sel.value = cur||'Todas';
+    sel.dataset.filled='1';
+  }
+  $('#filtroProv').onchange = ()=> attachRealtime.lastRows && renderMarkers(attachRealtime.lastRows);
+
+  // ====== Exportar PNG ======
+  $('#exportPng').onclick = async()=>{
+    const node = document.getElementById('map');
+    await sleep(200);
+    const canvas = await html2canvas(node, { useCORS:true, backgroundColor:'#ffffff', scale:2 });
+    const a = document.createElement('a'); a.download = 'afiliados_espana.png'; a.href = canvas.toDataURL('image/png'); a.click();
+  };
+
+  // ====== Exportar CSV agregado ======
+  $('#btnExportAgg').onclick = async()=>{
+    const qSnap = await getDocs(collection(db, AGG_COL));
+    const rows = qSnap.docs.map(d=> d.data());
+    const header = ['ciudad','provincia','personas','tag','updatedAt'];
+    const lines = [header.join(',')].concat(
+      rows.map(r=> header.map(k=> '"'+String(r[k]??'').replaceAll('"','""')+'"').join(','))
+    );
+    const blob = new Blob([lines.join('\n')], {type:'text/csv;charset=utf-8'});
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'agregado_nacional.csv'; a.click(); URL.revokeObjectURL(a.href);
+  };
+
+  // ====== Vaciar (requiere reglas) ======
+  $('#btnWipe').onclick = async()=>{
+    if(!confirm('¿Vaciar agregado nacional?')) return;
+    const snap = await getDocs(collection(db, AGG_COL));
+    const batch = writeBatch(db);
+    snap.forEach(d=> batch.delete(d.ref));
+    await batch.commit();
+  };
+
+  window.focusCity = async (r)=>{
+    try{
+      const g = await geocodeCity(r.ciudad, r.provincia);
+      map.setView([g.lat,g.lon], 11);
+    }catch(e){}
+  }
+
+</script>
+</body>
+</html>
