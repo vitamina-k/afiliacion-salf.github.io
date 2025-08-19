@@ -1,7 +1,16 @@
-provincia,municipio_es,municipio_local,lat,lon,aliases
-A Coruña,A Coruña,A Coruña,43.3623,-8.4115,La Coruña|La Coruna|Coruna
-Gipuzkoa,San Sebastián,Donostia,43.3214,-1.9857,Donostia-San Sebastian|San Sebastian
-Bizkaia,Bilbao,Bilbo,43.2630,-2.9350,Bilbo
-Valencia,Valencia,València,39.4702,-0.3768,València|Valenca
-Castellón,Castellón de la Plana,Castelló de la Plana,39.9864,-0.0513,Castellon|Castello|Castello De La Plana
-Illes Balears,Palma,Palma,39.5696,2.6502,Palma De Mallorca|Palma Mallorca
+provincia,municipio_es,municipio_local,lat,lon
+Barcelona,Barcelona,Barcelona,41.3888,2.1590
+Barcelona,L'Hospitalet de Llobregat,L'Hospitalet de Llobregat,41.3662,2.1165
+Barcelona,Sabadell,Sabadell,41.5463,2.1086
+Barcelona,Sant Cugat del Vallès,Sant Cugat del Vallès,41.4740,2.0856
+Girona,Girona,Girona,41.9831,2.8249
+Lleida,Lérida,Lleida,41.6167,0.6222
+Tarragona,Tarragona,Tarragona,41.1189,1.2445
+Valencia,Valencia,València,39.4702,-0.3768
+Castellón,Castellón de la Plana,Castelló de la Plana,39.9864,-0.0513
+A Coruña,La Coruña,A Coruña,43.3623,-8.4115
+Pontevedra,Vigo,Vigo,42.2406,-8.7207
+Bizkaia,Bilbao,Bilbo,43.2630,-2.9350
+Gipuzkoa,San Sebastián,Donostia,43.3214,-1.9857
+Álava,Vitoria,Vitoria-Gasteiz,42.8467,-2.6727
+Madrid,Madrid,Madrid,40.4167,-3.7033
