@@ -1,123 +1,196 @@
 <!DOCTYPE html>
-<button class="btn" id="fitEsp">🇪🇸 Ver España</button>
-</div>
-<div id="map"></div>
-<div class="bottom-right">
-<button class="btn" id="exportPng">🖼️ Descargar PNG</button>
-</div>
-</main>
-</div>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Afiliación – Mapa Maestro (GitHub)</title>
 
+  <!-- Leaflet CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="anonymous" />
 
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin="anonymous"></script>
-<script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js" crossorigin="anonymous"></script>
-<script>
-// ====== Estado ======
-let rows = []; // { ciudad, provincia, personas }
-let markers = new Map(); // key => marker
-const $ = (s)=> document.querySelector(s);
-const sleep = (ms)=> new Promise(r=>setTimeout(r,ms));
+  <style>
+    /* Alturas reales y layout en 2 columnas (panel + mapa) */
+    html, body { height: 100%; margin: 0; }
+    .app { display: grid; grid-template-columns: 360px 1fr; height: 100vh; background: #0b1020; color: #e7eeff; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial; }
+    #panel { background: #0f1730; border-right: 1px solid rgba(255,255,255,.12); padding: 12px; overflow: auto; }
+    #map-wrap { position: relative; height: 100%; }
+    #map { height: 100%; width: 100%; }
 
+    h1 { font-size: 18px; margin: 0 0 8px; }
+    .sub { color: #9fb0d0; font-size: 12px; margin-bottom: 10px; }
+    .card { background: #131b3b; border: 1px solid rgba(255,255,255,.12); border-radius: 12px; padding: 10px; margin: 10px 0; }
+    label { font-size: 12px; color: #9fb0d0; display: block; margin: 4px 0; }
+    input, select { width: 100%; padding: 8px 10px; border-radius: 10px; border: 1px solid rgba(255,255,255,.12); background: #0d1a3a; color: #e7eeff; outline: none; }
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 10px; border: 1px solid rgba(255,255,255,.12); background: #142459; color: #e7eeff; border-radius: 10px; cursor: pointer; }
+    .btn.small { padding: 6px 8px; font-size: 12px; }
+    .chip { display: inline-block; padding: .2rem .5rem; border-radius: 999px; background: #162457; border: 1px solid rgba(255,255,255,.12); color: #9fb0d0; font-size: 12px; }
 
-// ====== Mapa ======
-const map = L.map('map');
-map.setView([40.25,-3.7], 5.5);
-const base = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {maxZoom: 18, attribution: '© OpenStreetMap & CARTO', crossOrigin: true}).addTo(map);
-function markerSize(n){ return Math.min(80, Math.max(18, 16 + Math.sqrt(n)*6)); }
-function makeIcon(n){ const s=markerSize(n); return L.divIcon({ className:'', html:`<div style="background:#2957ff;color:#fff;border-radius:999px;border:2px solid rgba(255,255,255,.85);width:${s}px;height:${s}px;display:flex;align-items:center;justify-content:center;font-weight:800;box-shadow:0 10px 20px rgba(0,0,0,.35),0 0 0 3px rgba(255,255,255,.2) inset">${n}</div>`, iconSize:[s,s], iconAnchor:[s/2,s/2] }); }
+    .topbar { position: absolute; top: 12px; left: 12px; z-index: 10; display: flex; gap: 8px; flex-wrap: wrap; }
+    .bottom-right { position: absolute; right: 12px; bottom: 12px; z-index: 10; display: flex; gap: 8px; flex-wrap: wrap; }
 
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td { border-bottom: 1px solid rgba(255,255,255,.12); padding: 8px 6px; text-align: left; }
+    th { color: #9fb0d0; position: sticky; top: 0; background: #111b3a; }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <!-- PANEL IZQUIERDO: IDs que usa tu script -->
+    <aside id="panel">
+      <h1>Afiliación – Mapa Maestro</h1>
+      <div class="sub">Lee <code>data/agregado.json</code> generado por GitHub Actions.</div>
 
-// ====== Geocache (localStorage) ======
-async function geocode(ciudad, provincia){
-const key = `geo__${provincia}__${ciudad}`;
-const cached = localStorage.getItem(key);
-if(cached){ try{ return JSON.parse(cached); }catch(_){} }
-const url = new URL('https://nominatim.openstreetmap.org/search');
-url.searchParams.set('format','jsonv2');
-url.searchParams.set('q', `${ciudad}, ${provincia}, España`);
-url.searchParams.set('limit','1');
-const res = await fetch(url, { headers: { 'Accept': 'application/json' }});
-const data = await res.json();
-if(data?.length){ const out = { lat: +data[0].lat, lon: +data[0].lon }; localStorage.setItem(key, JSON.stringify(out)); await sleep(300); return out; }
-return null;
-}
+      <div class="card">
+        <div class="row">
+          <div>
+            <label>Provincia</label>
+            <select id="filtroProv"><option value="Todas">Todas</option></select>
+          </div>
+          <div>
+            <label>Búsqueda</label>
+            <input id="buscar" placeholder="Ciudad…" />
+          </div>
+        </div>
+        <div style="display:flex; gap:8px; margin-top:10px;">
+          <span id="sumSpan" class="chip">Total: 0</span>
+          <button class="btn small" id="reloadBtn">↻ Recargar</button>
+          <a class="btn small" href="data/agregado.csv">⬇️ CSV</a>
+        </div>
+      </div>
 
+      <div class="card">
+        <div style="font-weight:800;margin-bottom:6px">Agregado (por ciudad)</div>
+        <table id="tbl">
+          <thead><tr><th>Ciudad</th><th>Provincia</th><th style="text-align:right">Personas</th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <div class="sub">Doble clic para enfocar en el mapa.</div>
+      </div>
+    </aside>
 
-function upsertMarker(r, lat, lon){
-const key = `${r.provincia}__${r.ciudad}`;
-let m = markers.get(key);
-if(!m){ m = L.marker([lat,lon], { icon: makeIcon(r.personas) }).addTo(map); markers.set(key,m); }
-else { m.setLatLng([lat,lon]); m.setIcon(makeIcon(r.personas)); }
-m.bindPopup(`<div style="min-width:220px"><div style="font-weight:800">${r.ciudad}</div><div class="sub">${r.provincia}</div><div class="chip">Personas: <b>${r.personas}</b></div></div>`);
-}
+    <!-- MAPA (mismos IDs y botones) -->
+    <main id="map-wrap">
+      <div class="topbar">
+        <button class="btn" id="fitEsp">🇪🇸 Ver España</button>
+      </div>
+      <div id="map"></div>
+      <div class="bottom-right">
+        <button class="btn" id="exportPng">🖼️ Descargar PNG</button>
+      </div>
+    </main>
+  </div>
 
+  <!-- Librerías -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js" crossorigin="anonymous"></script>
 
-async function renderMarkers(){
-// Limpiar los que ya no están
-const active = new Set(rows.map(r=> `${r.provincia}__${r.ciudad}`));
-for(const [k,m] of markers){ if(!active.has(k)){ m.remove(); markers.delete(k); } }
-// Pintar actuales
-for(const r of rows){
-try{
-const g = await geocode(r.ciudad, r.provincia);
-if(g) upsertMarker(r, g.lat, g.lon);
-}catch(e){/* noop */}
-}
-}
+  <!-- TU SCRIPT (sin tocar nada) -->
+  <script>
+  // ====== Estado ======
+  let rows = []; // { ciudad, provincia, personas }
+  let markers = new Map(); // key => marker
+  const $ = (s)=> document.querySelector(s);
+  const sleep = (ms)=> new Promise(r=>setTimeout(r,ms));
 
+  // ====== Mapa ======
+  const map = L.map('map');
+  map.setView([40.25,-3.7], 5.5);
+  const base = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {maxZoom: 18, attribution: '© OpenStreetMap & CARTO', crossOrigin: true}).addTo(map);
+  function markerSize(n){ return Math.min(80, Math.max(18, 16 + Math.sqrt(n)*6)); }
+  function makeIcon(n){ const s=markerSize(n); return L.divIcon({ className:'', html:`<div style="background:#2957ff;color:#fff;border-radius:999px;border:2px solid rgba(255,255,255,.85);width:${s}px;height:${s}px;display:flex;align-items:center;justify-content:center;font-weight:800;box-shadow:0 10px 20px rgba(0,0,0,.35),0 0 0 3px rgba(255,255,255,.2) inset">${n}</div>`, iconSize:[s,s], iconAnchor:[s/2,s/2] }); }
 
-function renderTable(){
-const q = ($('#buscar').value||'').toLowerCase();
-const prov = $('#filtroProv').value || 'Todas';
-const tbody = $('#tbl tbody'); tbody.innerHTML='';
-let total = 0;
-const items = rows.filter(r=> (prov==='Todas' || r.provincia===prov) && (!q || (r.ciudad+" "+r.provincia).toLowerCase().includes(q)))
-.sort((a,b)=> (b.personas-a.personas) || a.provincia.localeCompare(b.provincia) || a.ciudad.localeCompare(b.ciudad));
-for(const r of items){
-total += Number(r.personas)||0;
-const tr = document.createElement('tr');
-tr.innerHTML = `<td>${r.ciudad}</td><td>${r.provincia}</td><td style="text-align:right">${r.personas}</td>`;
-tr.ondblclick = async ()=>{
-const g = await geocode(r.ciudad, r.provincia); if(g) map.setView([g.lat,g.lon], 11);
-};
-tbody.appendChild(tr);
-}
-$('#sumSpan').textContent = `Total: ${total}`;
-}
+  // ====== Geocache (localStorage) ======
+  async function geocode(ciudad, provincia){
+    const key = `geo__${provincia}__${ciudad}`;
+    const cached = localStorage.getItem(key);
+    if(cached){ try{ return JSON.parse(cached); }catch(_){} }
+    const url = new URL('https://nominatim.openstreetmap.org/search');
+    url.searchParams.set('format','jsonv2');
+    url.searchParams.set('q', `${ciudad}, ${provincia}, España`);
+    url.searchParams.set('limit','1');
+    const res = await fetch(url, { headers: { 'Accept': 'application/json' }});
+    const data = await res.json();
+    if(data?.length){ const out = { lat: +data[0].lat, lon: +data[0].lon }; localStorage.setItem(key, JSON.stringify(out)); await sleep(300); return out; }
+    return null;
+  }
 
+  function upsertMarker(r, lat, lon){
+    const key = `${r.provincia}__${r.ciudad}`;
+    let m = markers.get(key);
+    if(!m){ m = L.marker([lat,lon], { icon: makeIcon(r.personas) }).addTo(map); markers.set(key,m); }
+    else { m.setLatLng([lat,lon]); m.setIcon(makeIcon(r.personas)); }
+    m.bindPopup(`<div style="min-width:220px"><div style="font-weight:800">${r.ciudad}</div><div class="sub">${r.provincia}</div><div class="chip">Personas: <b>${r.personas}</b></div></div>`);
+  }
 
-function buildProvFilter(){
-const sel = $('#filtroProv');
-const set = new Set(rows.map(r=> r.provincia));
-const cur = sel.value;
-sel.innerHTML = `<option value="Todas">Todas</option>` + Array.from(set).sort().map(p=> `<option value="${p}">${p}</option>`).join('');
-sel.value = cur||'Todas';
-}
+  async function renderMarkers(){
+    // Limpiar los que ya no están
+    const active = new Set(rows.map(r=> `${r.provincia}__${r.ciudad}`));
+    for(const [k,m] of markers){ if(!active.has(k)){ m.remove(); markers.delete(k); } }
+    // Pintar actuales
+    for(const r of rows){
+      try{
+        const g = await geocode(r.ciudad, r.provincia);
+        if(g) upsertMarker(r, g.lat, g.lon);
+      }catch(e){/* noop */}
+    }
+  }
 
+  function renderTable(){
+    const q = ($('#buscar').value||'').toLowerCase();
+    const prov = $('#filtroProv').value || 'Todas';
+    const tbody = $('#tbl tbody'); tbody.innerHTML='';
+    let total = 0;
+    const items = rows.filter(r=> (prov==='Todas' || r.provincia===prov) && (!q || (r.ciudad+" "+r.provincia).toLowerCase().includes(q)))
+      .sort((a,b)=> (b.personas-a.personas) || a.provincia.localeCompare(b.provincia) || a.ciudad.localeCompare(b.ciudad));
+    for(const r of items){
+      total += Number(r.personas)||0;
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td>${r.ciudad}</td><td>${r.provincia}</td><td style="text-align:right">${r.personas}</td>`;
+      tr.ondblclick = async ()=>{
+        const g = await geocode(r.ciudad, r.provincia); if(g) map.setView([g.lat,g.lon], 11);
+      };
+      tbody.appendChild(tr);
+    }
+    $('#sumSpan').textContent = `Total: ${total}`;
+  }
 
-async function loadData(){
-const res = await fetch('data/agregado.json', { cache: 'no-store' });
-const data = await res.json();
-rows = Array.isArray(data)? data : (data.rows||[]);
-buildProvFilter();
-renderTable();
-renderMarkers();
-}
+  function buildProvFilter(){
+    const sel = $('#filtroProv');
+    const set = new Set(rows.map(r=> r.provincia));
+    const cur = sel.value;
+    sel.innerHTML = `<option value="Todas">Todas</option>` + Array.from(set).sort().map(p=> `<option value="${p}">${p}</option>`).join('');
+    sel.value = cur||'Todas';
+  }
 
+  async function loadData(){
+    const res = await fetch('data/agregado.json', { cache: 'no-store' });
+    const data = await res.json();
+    rows = Array.isArray(data)? data : (data.rows||[]);
+    buildProvFilter();
+    renderTable();
+    renderMarkers();
+    setTimeout(()=> map.invalidateSize(), 200);
+  }
 
-$('#fitEsp').onclick = ()=> map.setView([40.25,-3.7], 5.5);
-$('#reloadBtn').onclick = loadData;
-$('#buscar').oninput = renderTable;
-$('#filtroProv').onchange = ()=>{ renderTable(); renderMarkers(); };
-$('#exportPng').onclick = async()=>{
-await sleep(200);
-const canvas = await html2canvas(document.getElementById('map'), { useCORS:true, backgroundColor:'#ffffff', scale:2 });
-const a = document.createElement('a'); a.download = 'afiliados_es.png'; a.href = canvas.toDataURL('image/png'); a.click();
-};
+  // ====== Eventos ======
+  // (mantengo exactamente los IDs que usas)
+  document.getElementById('fitEsp').onclick = ()=> map.setView([40.25,-3.7], 5.5);
+  document.getElementById('reloadBtn').onclick = loadData;
+  document.getElementById('buscar').oninput = renderTable;
+  document.getElementById('filtroProv').onchange = ()=>{ renderTable(); renderMarkers(); };
+  document.getElementById('exportPng').onclick = async()=>{
+    await sleep(200);
+    const canvas = await html2canvas(document.getElementById('map'), { useCORS:true, backgroundColor:'#ffffff', scale:2 });
+    const a = document.createElement('a'); a.download = 'afiliados_es.png'; a.href = canvas.toDataURL('image/png'); a.click();
+  };
 
-
-// Inicio
-loadData();
-</script>
+  // Inicio
+  window.addEventListener('load', () => {
+    setTimeout(()=> map.invalidateSize(), 200); // asegura que el mapa calcule bien el tamaño
+    loadData();
+  });
+  window.addEventListener('resize', () => map.invalidateSize());
+  </script>
 </body>
 </html>
