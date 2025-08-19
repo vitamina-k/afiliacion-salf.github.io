@@ -1,4 +1,4 @@
-import csv, json, os, unicodedata
+import csv, json, unicodedata
 from collections import defaultdict
 from pathlib import Path
 
@@ -11,19 +11,23 @@ INPUT_DIR = BASE / "input"
 DATA_DIR = BASE / "data"
 DATA_DIR.mkdir(exist_ok=True)
 
-GAZETTEER_PATH = DATA_DIR / "municipios_es.csv"  # columnas: provincia,municipio_es,municipio_local,lat,lon,aliases(opc)
+# Gazetteer con dos columnas clave por municipio:
+# provincia,municipio_es,municipio_local[,lat,lon]
+GAZETTEER_PATH = DATA_DIR / "municipios_es.csv"
 
 # ---------- utilidades ----------
 def norm_basic(s: str) -> str:
     if not isinstance(s, str): return ""
     s = s.strip()
     s = unicodedata.normalize("NFKC", s)
-    s = s.replace("´", "'").replace("’", "'").replace("`", "'")
+    # unificar apostrofes raros
+    s = s.replace("´", "'").replace("’", "'").replace("`", "'").replace("‘", "'")
+    # espacios
     s = " ".join(s.split())
     return s
 
 def norm_key(s: str) -> str:
-    # clave robusta para diccionarios: sin tildes, minúsculas, sin dobles espacios
+    # clave robusta: sin tildes, minúsculas, sin dobles espacios
     s = norm_basic(s)
     s = unidecode(s).lower()
     return " ".join(s.split())
@@ -31,7 +35,7 @@ def norm_key(s: str) -> str:
 def title_soft(s: str) -> str:
     if not s: return s
     parts = s.split()
-    lowers = {"de","del","la","las","los","y","e","o","u","da","do","das","dos"}
+    lowers = {"de","del","la","las","los","y","e","o","u","da","do","das","dos","d"}
     out=[]
     for w in parts:
         wl = w.lower()
@@ -45,41 +49,102 @@ def title_soft(s: str) -> str:
 def normalize_prov(s: str) -> str:
     return title_soft(norm_basic(s))
 
-# ---------- cargar gazetteer ----------
+# ---------- generador de alias a partir de (castellano, local) ----------
+def gen_aliases(name: str) -> set:
+    """
+    Dado un nombre, genera variantes:
+    - sin tildes/diacríticos
+    - l·l -> ll (ela geminada) y variante "l·l"→"ll"
+    - apostrofes normalizados y eliminados
+    - guiones↔espacios y sin separadores
+    - abreviaturas Sant/San/Sta.
+    - artículos L'/La, D'/De
+    """
+    base = norm_basic(name)
+    variants = set([base])
+
+    # 1) sin diacríticos
+    variants.add(unidecode(base))
+
+    # 2) ela geminada
+    v_e = base.replace("l·l", "ll").replace("L·L", "LL").replace("·", "")
+    variants.add(v_e); variants.add(unidecode(v_e))
+
+    # 3) apostrofes variantes y sin apóstrofe
+    ap_vars = set()
+    for v in list(variants):
+        ap_vars.add(v.replace("'", ""))            # sin apostrofe
+        ap_vars.add(v.replace(" d'", " de ").replace(" l'", " la ").replace(" s'", " sa "))
+        ap_vars.add(v.replace(" D'", " De ").replace(" L'", " La ").replace(" S'", " Sa "))
+    variants |= ap_vars
+
+    # 4) guiones/espacios y sin separadores
+    sep_vars = set()
+    for v in list(variants):
+        sep_vars.add(v.replace("-", " "))
+        sep_vars.add(v.replace(" ", "-"))
+        sep_vars.add(v.replace("-", "").replace(" ", ""))
+    variants |= sep_vars
+
+    # 5) Sant/San/Sta abreviaturas usuales
+    repl_map = {
+        "St. ": "San ",
+        "Sta. ": "Santa ",
+        "St ": "San ",
+        "Sta ": "Santa ",
+        "Sant ": "San ",   # castellano usa "San"
+        "Sants ": "San ",  # aproximación para errores comunes
+    }
+    abbr_vars = set()
+    for v in list(variants):
+        vv = v
+        for a,b in repl_map.items():
+            vv = vv.replace(a, b)
+        abbr_vars.add(vv)
+    variants |= abbr_vars
+
+    # 6) normalizar capitalización suave
+    variants = { title_soft(v) for v in variants }
+
+    return { v for v in variants if v }
+
+def build_alias_dict(gdf: pd.DataFrame):
+    """
+    Construye:
+      alias_map[(provincia, alias_norm)] -> municipio_es (castellano)
+      by_prov[provincia] -> set de municipios_es
+      all_muns -> lista nacional
+    """
+    alias_map = {}
+    by_prov = defaultdict(set)
+
+    for _, r in gdf.iterrows():
+        prov = normalize_prov(r["provincia"])
+        mun_es  = title_soft(norm_basic(r["municipio_es"]))
+        mun_loc = title_soft(norm_basic(r.get("municipio_local", "") or ""))
+
+        if not prov or not mun_es: 
+            continue
+
+        aliases = set()
+        aliases |= gen_aliases(mun_es)
+        if mun_loc:
+            aliases |= gen_aliases(mun_loc)
+
+        # guardar alias -> canónico en castellano
+        for a in aliases:
+            alias_map[(prov, norm_key(a))] = mun_es
+
+        by_prov[prov].add(mun_es)
+
+    all_muns = sorted({m for s in by_prov.values() for m in s})
+    return alias_map, by_prov, all_muns
+
 def load_gazetteer():
     if not GAZETTEER_PATH.exists():
         return None
     g = pd.read_csv(GAZETTEER_PATH, dtype=str).fillna("")
-    # esperado: provincia, municipio_es, municipio_local, lat, lon, aliases(opcional)
-    g["provincia_n"] = g["provincia"].map(normalize_prov)
-    g["mun_es"]      = g["municipio_es"].map(title_soft)
-    g["mun_local"]   = g["municipio_local"].map(title_soft)
-
-    # construir diccionario: (provincia, alias_norm) -> mun_es
-    alias_map = {}
-    by_prov = defaultdict(set)
-
-    for _, r in g.iterrows():
-        prov = r["provincia_n"]
-        mun_es = r["mun_es"]
-        mun_local = r["mun_local"]
-        if not prov or not mun_es: 
-            continue
-
-        # alias base: mun_es, mun_local
-        aliases = {mun_es, mun_local}
-        # aliases extras
-        extra = [a.strip() for a in (r.get("aliases") or "").split("|") if a.strip()]
-        aliases.update(extra)
-
-        for a in aliases:
-            if not a: continue
-            alias_map[(prov, norm_key(a))] = mun_es
-            by_prov[prov].add(mun_es)
-
-    # lista nacional para fuzzy de respaldo
-    all_muns = sorted({m for s in by_prov.values() for m in s})
-    return alias_map, by_prov, all_muns
+    return build_alias_dict(g)
 
 GAZ = load_gazetteer()
 
@@ -94,42 +159,41 @@ def canonical_city(prov: str, raw_city: str):
     if not city_raw:
         return "", "", 0, "none"
 
-    # 1) diccionario exacto por alias (preferido)
     if GAZ:
         alias_map, by_prov, all_muns = GAZ
-        key = norm_key(city_raw)
-        hit = alias_map.get((prov_n, key))
+
+        # 1) alias exacto (con variantes generadas)
+        hit = alias_map.get((prov_n, norm_key(city_raw)))
         if hit:
             return hit, "", 100, "alias"
 
         # 2) fuzzy por provincia
         choices = sorted(by_prov.get(prov_n, []))
         if choices:
-            match = process.extractOne(city_raw, choices, scorer=fuzz.WRatio)
-            if match:
-                mname, score, _ = match
+            m = process.extractOne(city_raw, choices, scorer=fuzz.WRatio)
+            if m:
+                name, score, _ = m
                 if score >= THRESH_FIX:
-                    return mname, "", score, "provincia"
+                    return name, "", score, "provincia"
                 elif score >= THRESH_SUGGEST:
-                    return city_raw, mname, score, "provincia"
+                    return city_raw, name, score, "provincia"
 
         # 3) fuzzy nacional
         if all_muns:
-            match = process.extractOne(city_raw, all_muns, scorer=fuzz.WRatio)
-            if match:
-                mname, score, _ = match
+            m = process.extractOne(city_raw, all_muns, scorer=fuzz.WRatio)
+            if m:
+                name, score, _ = m
                 if score >= THRESH_FIX:
-                    return mname, "", score, "nacional"
+                    return name, "", score, "nacional"
                 elif score >= THRESH_SUGGEST:
-                    return city_raw, mname, score, "nacional"
+                    return city_raw, name, score, "nacional"
 
-    # 4) sin gazetteer: solo formateo suave
+    # 4) sin gazetteer: formateo suave
     return title_soft(city_raw), "", 0, "none"
 
 # ---------- lectura flexible input ----------
 def detect_columns(df: pd.DataFrame):
     cols = [c.strip().lower() for c in df.columns]
-    # ciudad / localidad
     city_col = "ciudad" if "ciudad" in cols else ("localidad" if "localidad" in cols else None)
     prov_col = "provincia" if "provincia" in cols else None
     people_col = "personas" if "personas" in cols else None
@@ -142,7 +206,6 @@ def iter_input_rows():
         try:
             df = pd.read_csv(path, dtype=str).dropna(how="all")
         except Exception:
-            # fallback muy permisivo
             df = pd.read_csv(path, dtype=str, sep=",", engine="python").dropna(how="all")
         if df.empty: 
             continue
