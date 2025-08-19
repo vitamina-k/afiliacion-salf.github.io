@@ -1,10 +1,11 @@
-name: Build agregado afiliación
+name: Build agregado afiliación (debug)
 
 on:
   push:
     paths:
       - 'input/**'
       - 'scripts/**'
+      - 'data/municipios_es.csv'
       - '.github/workflows/aggregate.yml'
   workflow_dispatch: {}
 
@@ -18,6 +19,21 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Show repo tree (before)
+        run: |
+          echo "== PWD =========="
+          pwd
+          echo "== LS -la ======="
+          ls -la
+          echo "== TREE (top) ==="
+          ls -la .
+          echo "== INPUT ========"
+          if [ -d input ]; then find input -maxdepth 3 -type f -name "*.csv" -print; else echo "NO input/"; fi
+          echo "== SCRIPTS ======"
+          if [ -d scripts ]; then ls -la scripts; else echo "NO scripts/"; fi
+          echo "== DATA ========="
+          if [ -d data ]; then ls -la data; else echo "NO data/"; fi
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -26,27 +42,50 @@ jobs:
       - name: Install deps
         run: |
           python -m pip install --upgrade pip
-          pip install pandas
-
-       - name: Install deps
-        run: |
-          python -m pip install --upgrade pip
           pip install pandas rapidfuzz unidecode
-
+          python -c "import sys, pandas, rapidfuzz, unidecode; print('OK deps:', sys.version, pandas.__version__)"
 
       - name: Ensure data folder
+        run: mkdir -p data
+
+      - name: Preview first lines of input CSVs
         run: |
-          mkdir -p data
+          set +e
+          for f in $(find input -type f -name "*.csv"); do
+            echo "---- $f ----"
+            head -n 5 "$f" || true
+          done
 
       - name: Run aggregator
         run: |
+          set -xe
           python scripts/aggregate.py
+
+      - name: Show outputs (after)
+        run: |
+          echo "== DATA after aggregator =="
+          ls -la data || true
+          echo "== agregado.json head =="
+          if [ -f data/agregado.json ]; then head -n 50 data/agregado.json; else echo "NO agregado.json"; fi
+          echo "== agregado.csv head =="
+          if [ -f data/agregado.csv ]; then head -n 10 data/agregado.csv; else echo "NO agregado.csv"; fi
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: agregado-salida
+          path: |
+            data/agregado.json
+            data/agregado.csv
+            data/sugerencias.csv
+            data/pendientes.csv
+          if-no-files-found: warn
 
       - name: Commit aggregated data
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add data/agregado.csv data/agregado.json || true
+          git add data/agregado.csv data/agregado.json data/sugerencias.csv data/pendientes.csv || true
           if ! git diff --cached --quiet; then
             git commit -m "chore(agregado): actualizar datos"
             git push
