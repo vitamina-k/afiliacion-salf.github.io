@@ -193,27 +193,66 @@ def canonical_city(prov: str, raw_city: str):
 
 # ---------- lectura flexible input ----------
 def detect_columns(df: pd.DataFrame):
-    cols = [c.strip().lower() for c in df.columns]
-    city_col = "ciudad" if "ciudad" in cols else ("localidad" if "localidad" in cols else None)
-    prov_col = "provincia" if "provincia" in cols else None
-    people_col = "personas" if "personas" in cols else None
-    if not city_col or not prov_col:
-        raise ValueError("Faltan columnas requeridas: 'provincia' y 'ciudad' (o 'localidad').")
-    return city_col, prov_col, people_col
+    # nombres originales y normalizados (quita BOM \ufeff, espacios, minúsculas)
+    raw_cols = list(df.columns)
+    cols = [str(c).replace("\ufeff","").strip().lower() for c in raw_cols]
+
+    # sinónimos admitidos
+    city_syns   = {"ciudad","localidad","municipio","poblacion","población","villa","pueblo","municipi"}
+    prov_syns   = {"provincia","province","prov"}
+    people_syns = {"personas","n","num","numero","número","count","cantidad","total"}
+
+    city_col = prov_col = people_col = None
+    for i, cl in enumerate(cols):
+        if prov_col   is None and cl in prov_syns:   prov_col   = raw_cols[i]
+        if city_col   is None and cl in city_syns:   city_col   = raw_cols[i]
+        if people_col is None and cl in people_syns: people_col = raw_cols[i]
+
+    # Si no detectamos cabecera, asumir por POSICIÓN si hay 2-3 columnas
+    if city_col is None or prov_col is None:
+        if len(df.columns) in (2,3):
+            df.columns = ["provincia","ciudad"] + (["personas"] if len(df.columns)==3 else [])
+            return "ciudad", "provincia", ("personas" if len(df.columns)==3 else None)
+
+    if city_col and prov_col:
+        return city_col, prov_col, people_col
+
+    raise ValueError("Faltan columnas requeridas: 'provincia' y 'ciudad' (o 'localidad').")
 
 def iter_input_rows():
     for path in INPUT_DIR.rglob("*.csv"):
+        # Leer con autodetección de separador y quitando BOM
         try:
-            df = pd.read_csv(path, dtype=str).dropna(how="all")
+            df = pd.read_csv(
+                path,
+                dtype=str,
+                sep=None,              # auto-sniff: coma, punto y coma, tab, etc.
+                engine="python",
+                encoding="utf-8-sig",  # elimina BOM si lo hay
+            ).dropna(how="all")
         except Exception:
-            df = pd.read_csv(path, dtype=str, sep=",", engine="python").dropna(how="all")
-        if df.empty: 
-            continue
-        city_col, prov_col, people_col = detect_columns(df)
-        df[prov_col] = df[prov_col].astype(str)
-        df[city_col] = df[city_col].astype(str)
+            # Reintentos conservadores con separadores comunes
+            df = pd.DataFrame()
+            for sep in [",",";","\t","|"]:
+                try:
+                    df = pd.read_csv(path, dtype=str, sep=sep, engine="python", encoding="utf-8-sig").dropna(how="all")
+                    if not df.empty: break
+                except Exception:
+                    pass
 
-        if people_col and people_col in df:
+        if df.empty:
+            print(f"⚠️ No se pudo leer {path} o está vacío")
+            continue
+
+        # Detectar columnas (tolerante a BOM/sinónimos/sin cabecera)
+        city_col, prov_col, people_col = detect_columns(df)
+
+        # Normalizar valores
+        df[prov_col] = df[prov_col].astype(str).str.replace("\ufeff","", regex=False)
+        df[city_col] = df[city_col].astype(str).str.replace("\ufeff","", regex=False)
+
+        # personas: si no hay, cuenta 1 por fila
+        if people_col and people_col in df.columns:
             df["__personas__"] = pd.to_numeric(df[people_col], errors="coerce").fillna(0).astype(int)
         else:
             df["__personas__"] = 1
